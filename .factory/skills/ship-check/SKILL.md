@@ -264,3 +264,162 @@ Lint Command: <command or none>
 Result: <short result>
 Reason: <one short explanation>
 ```
+
+## Build Check
+
+Inspect the repository for an existing project-defined build workflow, and only if a safe local build is confidently identified, run the repository's own build command in an isolated disposable workspace so the original repository is not modified. Do not invent a build command, do not install dependencies, do not deploy or publish, and do not alter the original working tree or Git history.
+
+### Intent
+
+Determine whether the project's existing build workflow succeeds before shipping, by discovering and executing the repository's own build command in isolation rather than assuming a command such as `npm run build` or `make build`.
+
+### Discovery approach
+
+Inspect the repository before executing anything. Prefer explicit project-defined or documented default build commands.
+
+Possible evidence includes:
+
+- package manager scripts (e.g., `package.json` `scripts.build`, with lockfiles indicating npm/pnpm/yarn),
+- Makefile or task-runner/just targets (e.g., `make build`, `task build`, `just build`, `deno build`),
+- Python build configuration (e.g., `pyproject.toml`, `setup.py`),
+- Rust/Go/JVM/C/C++ project configuration (e.g., `Cargo.toml`, `go.mod`, `build.gradle`/`pom.xml`, `CMakeLists.txt`),
+- repository documentation (e.g., README or AGENTS.md stating how to build),
+- CI configuration (e.g., `.github/workflows`, `.circleci/config.yml`) as supporting evidence.
+
+Configuration alone does not authorize inventing a command. Do not infer a runnable build command solely from the language/framework. Inspect wrapper definitions such as `npm run build`, `make build`, `task build`, and `just build` before executing. If multiple plausible commands exist with no project-defined default, return BLOCKED.
+
+### Current-state definition
+
+Build Check evaluates the CURRENT on-disk project state, not merely HEAD. The isolated workspace must represent:
+
+- current tracked-file contents,
+- staged and unstaged working-tree contents as they exist on disk,
+- and relevant untracked files that are not ignored.
+
+For partially staged files, use the current working-tree contents on disk. Do not silently substitute HEAD or an older committed version.
+
+### Isolation strategy
+
+First version: project-tree filesystem isolation in a disposable temporary directory.
+
+1. Perform command discovery and safety inspection read-only in the original repository.
+2. Create a unique disposable temporary directory outside the original repository.
+3. For a Git repository, construct the disposable project tree from tracked files that currently exist on disk, plus untracked, non-ignored files.
+4. Copy the CURRENT filesystem contents of those paths. Do not reconstruct tracked files from HEAD.
+5. Do not copy `.git` metadata, ignored dependency directories, ignored caches, generated ignored artifacts, obvious local secrets/credentials, or other machine-local state merely to make the build succeed.
+6. Preserve normal project directory structure and file modes where practical.
+7. Symlink safety: inspect project symlinks before build execution. If a relevant symlink resolves outside the project root and safety cannot be confidently established, return BLOCKED.
+8. Execute the build with its working directory inside the disposable workspace only.
+9. Never intentionally run the project-defined build command from the original repository.
+10. After execution, remove the disposable workspace.
+11. Verify the original repository's Git status after cleanup and confirm ShipCheck did not alter it.
+
+This is project-tree filesystem isolation, not a full operating-system sandbox. It does not prevent every possible process-level or home-directory side effect. If inspection indicates the build may write outside its working directory, use absolute paths, parent-directory writes, home-directory writes, or external infrastructure, return BLOCKED.
+
+### Command and side-effect safety
+
+Before executing a wrapper such as `npm run build`, `make build`, `task build`, or `just build`, inspect the underlying project-defined script or target. Do not assume the wrapper is safe merely because its name contains "build".
+
+If the discovered command deploys, publishes, uploads artifacts remotely, pushes images, creates releases, or modifies remote infrastructure, return BLOCKED. Do not rewrite the project's build command into a different command. If inspection indicates the build may write outside the disposable workspace, return BLOCKED.
+
+### Dependencies / secrets / network boundaries
+
+- Do not install dependencies. Do not install runtimes or compilers. Do not copy ignored dependency directories merely to make the build pass.
+- If required tooling or dependencies are unavailable in the disposable workspace, return BLOCKED. A missing dependency/tooling failure is NOT a project build FAIL.
+- Do not intentionally provide secrets, credentials, signing keys, tokens, or local `.env` state to the isolated build. Do not run install/fetch/deploy/publish/release commands as Build Check.
+- If the build requires secrets, credentials, required remote services, or unavailable network resources, return BLOCKED.
+
+### Build vs deploy/release
+
+A Build Check may run a local project build. It must NOT deploy, publish packages, push container images, upload artifacts to remote services, create releases, alter remote infrastructure, or substitute a deployment/release workflow for a local build. If the only project-defined build-like workflow includes those side effects and no safe local build is defined, return BLOCKED.
+
+### Build / test overlap
+
+If the project explicitly defines a safe local build command that internally performs tests or other local validation, use the project-defined build command as-is. Do not remove or rewrite those steps.
+
+### Monorepos
+
+Prefer one explicit repository-level default build workflow. If multiple independent build roots/workflows exist and no authoritative project-level default can be identified, return BLOCKED. A documented subdirectory build may be used only when the project explicitly identifies it as the workflow to run.
+
+### Decision rules
+
+1. Inspect the repository before executing anything.
+2. Prefer explicit project-defined build commands or documented defaults.
+3. Inspect wrapper scripts/targets before executing; do not assume a wrapper named "build" is a pure local build.
+4. If the discovered command deploys, publishes, uploads, pushes images, creates releases, or performs remote side effects, return BLOCKED.
+5. If multiple plausible build commands exist and there is no clear project-defined default, return BLOCKED.
+6. If no build workflow can be confidently identified, return NOT FOUND.
+7. If a workflow is identified but cannot be safely executed (missing runtime/tooling/dependencies, missing secrets/services, interactive/watch/server/indefinite, unsafe symlinks, possible out-of-workspace writes, or isolation cannot be established), return BLOCKED.
+8. If a safe local build command is identified and isolation can be established, run at most that one command in the disposable workspace for this initial version.
+
+### Exit classification
+
+Exit status 0 ⇒ PASS.
+
+For nonzero exits, distinguish:
+
+- FAIL — the compiler/build/static generation actually ran, required local tooling was available, and the failure is attributable to project source/build errors.
+- BLOCKED — required tooling/dependencies are missing, environment/secrets/network/services are unavailable, or ShipCheck cannot confidently distinguish the failure from an environment limitation.
+
+Do not automatically classify every nonzero build exit as FAIL.
+
+### Execution safety
+
+- Execute at most one project-defined build command.
+- Execute it only in the disposable workspace.
+- Do not install anything.
+- Do not modify the original repository.
+- Do not stage, commit, or push anything.
+- Do not deploy/publish/release/upload/push images.
+- Do not rewrite the project's build command.
+- Do not start interactive/watch/dev-server/indefinite processes.
+
+### Results
+
+PASS when all of the following are true:
+
+- a project-defined build workflow was confidently identified,
+- the current project state was safely reproduced in a disposable workspace,
+- exactly one build command was executed inside that isolated workspace,
+- and the build completed successfully.
+
+FAIL when all of the following are true:
+
+- a project-defined build workflow was confidently identified,
+- the isolated workspace was created successfully,
+- required local build tooling was available,
+- the build command actually ran,
+- and it returned nonzero because of a project/build failure attributable to the source or build itself.
+
+NOT FOUND when:
+
+- no existing project-defined or documented build workflow could be confidently identified.
+
+BLOCKED when:
+
+- a build workflow was identified, but ShipCheck could not safely or unambiguously execute it.
+
+Examples of BLOCKED include:
+
+- multiple plausible build commands with no clear project-defined default,
+- required runtime/tooling/dependencies are unavailable,
+- required ignored files, credentials, secrets, signing material, or external services are unavailable,
+- the workflow requires installation or dependency fetching,
+- the workflow is interactive, watch-mode, server-like, or indefinite,
+- the workflow deploys, publishes, uploads artifacts remotely, pushes images, creates releases, or modifies remote infrastructure,
+- the workflow appears capable of writing outside the disposable workspace,
+- safe isolation of the current working-tree state cannot be established,
+- unsafe external symlinks are present,
+- or a nonzero exit is attributable to environment/tooling/dependency limitations rather than a project build error.
+
+### Output
+
+Output exactly the following block, using PASS, FAIL, NOT FOUND, or BLOCKED as appropriate:
+
+```
+Build Check: PASS, FAIL, NOT FOUND, or BLOCKED
+Build Command: <command or none>
+Isolation: <short isolation description or none>
+Result: <short result>
+Reason: <one short explanation>
+```
