@@ -1,6 +1,6 @@
 # Factory ShipCheck
 
-ShipCheck is a reusable project-level Factory Skill for performing pre-ship readiness checks with Droid. Its first implemented check inspects a repository's Git state and reports whether that state passes the current readiness criteria.
+ShipCheck is a reusable project-level Factory Skill for performing pre-ship readiness checks with Droid. It currently implements Git-state and automated-test readiness checks, and reports whether a project passes the current readiness criteria. The full release-readiness roadmap is not yet complete.
 
 ## Why I Built This
 
@@ -8,7 +8,11 @@ This project is being built while learning Factory/Droid incrementally. Each cap
 
 ## Current Capabilities
 
-The only check implemented so far is the **Git State Check**. It inspects the current repository and reports:
+Two checks are implemented so far: the **Git State Check** and the **Test Check**.
+
+### Git State Check
+
+The Git State Check inspects the current repository and reports:
 
 - current branch
 - staged changes (anything staged but not committed)
@@ -17,6 +21,25 @@ The only check implemented so far is the **Git State Check**. It inspects the cu
 - unresolved merge conflicts
 
 The check is intentionally **read-only**: it inspects the repository using Git commands that cannot stage, discard, commit, stash, reset, or otherwise modify anything. A readiness check must never alter the state it is reporting on.
+
+### Test Check
+
+The Test Check inspects the repository to discover an existing project-defined automated test workflow, then runs the repository's own test command. It:
+
+- prefers explicit documented/default commands,
+- does not invent test commands,
+- does not install dependencies,
+- executes at most one safe, non-interactive existing test command,
+- and does not automatically fix failures.
+
+The Test Check has four possible results:
+
+- **PASS** — a test workflow was confidently identified and the test command completed successfully.
+- **FAIL** — the test workflow was identified and executed, but the tests failed.
+- **NOT FOUND** — no existing automated test workflow could be confidently identified.
+- **BLOCKED** — an intended test workflow was found, but ShipCheck could not safely or unambiguously execute one command.
+
+Multiple equally valid test commands with no project-defined default produce **BLOCKED** rather than allowing Droid to guess.
 
 ## Example Output
 
@@ -44,6 +67,17 @@ Merge Conflicts: No
 Reason: Untracked files are present in the working tree.
 ```
 
+The Test Check outputs a block of the same shape. A passing result looks like:
+
+```
+Test Check: PASS
+Test Command: sh test.sh
+Result: PASS: add 2 2 returned 4 (expected 4); exit status 0
+Reason: The repository's documented canonical test command completed successfully.
+```
+
+The Test Check classifies a repository as one of **PASS**, **FAIL**, **NOT FOUND**, or **BLOCKED**, based on whether a test workflow was identified and, if so, whether the repository's own test command completed successfully, failed, or could not be safely executed.
+
 ## How It Works
 
 ShipCheck is a **project-level Factory Skill**. Its entry point lives at:
@@ -69,6 +103,8 @@ You can also invoke the Skill directly with `/ship-check`.
 
 ## What We Tested
 
+### Git State Check
+
 We performed one behavioral test of the Git State Check against a real repository:
 
 1. **Clean repository → PASS.** With a clean working tree, the check reported `Git State: PASS`.
@@ -77,11 +113,22 @@ We performed one behavioral test of the Git State Check against a real repositor
 
 This demonstrated that the result changes in response to the actual repository state, rather than being a static or hardcoded outcome. The temporary file was not committed and was removed after the test.
 
+### Test Check
+
+We performed a set of behavioral tests of the Test Check:
+
+1. **Factory ShipCheck repository with no test workflow → NOT FOUND.** With no project-defined test command, the check reported `Test Check: NOT FOUND`.
+2. **Dependency-free demo repository with a single documented canonical command `sh test.sh` → PASS.** The command executed, exited 0, and the check reported `Test Check: PASS`.
+3. **Same demo repository with exactly one intentional application bug → FAIL.** The same test command executed, the assertion failed, exited 1, and the check reported `Test Check: FAIL`.
+4. **Exact committed application file restored → PASS again.** The same command executed, exited 0, and the check reported `Test Check: PASS`.
+5. **Demo repository temporarily documented two equally valid test commands with explicitly no default → BLOCKED.** ShipCheck did not choose either command and executed no test command, reporting `Test Check: BLOCKED`.
+
+This demonstrates the Test Check responds to repository evidence and actual command execution rather than producing a static classification.
+
 ## Roadmap
 
 The following checks are **planned** and will be added incrementally. They are not currently implemented:
 
-- tests
 - lint
 - build
 - documentation
@@ -94,4 +141,4 @@ This project is being built and tested with Factory Droid. The initial developme
 
 ## Status
 
-ShipCheck is an early work-in-progress. The Git State Check is implemented and tested; the other checks listed in the roadmap are not yet built.
+ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The remaining roadmap checks are not yet implemented.
