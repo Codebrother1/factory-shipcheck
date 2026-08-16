@@ -1,6 +1,6 @@
 # Factory ShipCheck
 
-ShipCheck is a reusable project-level Factory Skill for performing pre-ship readiness checks with Droid. It currently implements Git-state, automated-test, and lint/static-analysis readiness checks, and reports whether a project passes the current readiness criteria. The full release-readiness roadmap is not yet complete.
+ShipCheck is a reusable project-level Factory Skill for performing pre-ship readiness checks with Droid. It currently implements Git-state, automated-test, lint/static-analysis, and build readiness checks, and reports whether a project passes the current readiness criteria. The full release-readiness roadmap is not yet complete.
 
 ## Why I Built This
 
@@ -8,7 +8,7 @@ This project is being built while learning Factory/Droid incrementally. Each cap
 
 ## Current Capabilities
 
-Three checks are implemented so far: the **Git State Check**, the **Test Check**, and the **Lint Check**.
+Four checks are implemented so far: the **Git State Check**, the **Test Check**, the **Lint Check**, and the **Build Check**.
 
 ### Git State Check
 
@@ -65,6 +65,36 @@ Two BLOCKED reasons we behaviorally tested:
 1. The project-defined lint command is mutating.
 2. Multiple equally valid lint commands exist and the project defines no default.
 
+### Build Check
+
+The Build Check discovers an existing project-defined local build workflow, then runs the repository's own build command in isolation. It:
+
+- prefers explicit documented/default build commands,
+- does not invent a build command,
+- inspects the workflow for deploy/publish/release/remote side effects before execution,
+- evaluates the CURRENT on-disk working-tree state rather than silently substituting HEAD,
+- reproduces that current project state in a disposable workspace,
+- executes the build only inside that disposable workspace,
+- permits expected build artifacts to be generated there,
+- removes the disposable workspace afterward,
+- verifies the original repository remains unchanged,
+- does not install missing dependencies or tooling,
+- and treats the disposable workspace as project-tree filesystem isolation, NOT a full OS security sandbox.
+
+The Build Check has four possible results:
+
+- **PASS** — a project-defined build workflow was confidently identified, it was safely executed in a disposable workspace, and the build completed successfully.
+- **FAIL** — the build workflow was identified, required local tooling was available, the build actually executed in isolation, and it returned nonzero because of a project/source/build error.
+- **NOT FOUND** — no project-defined build workflow could be confidently identified.
+- **BLOCKED** — a build workflow was identified but could not safely or meaningfully be executed.
+
+Two BLOCKED reasons we behaviorally tested:
+
+1. The documented build workflow included a remote artifact upload / publication side effect.
+2. The documented build workflow required local build tooling that was unavailable.
+
+A nonzero exit is not automatically FAIL. Missing tooling, dependencies, secrets, required services, or environment requirements can produce BLOCKED rather than FAIL.
+
 ## Example Output
 
 The ShipCheck Git State Check outputs a fixed, concise block. A passing result looks like:
@@ -111,6 +141,16 @@ Result: lint PASS: app.sh does not contain marker "LINT_ERROR"; exit status 0
 Reason: The repository's documented non-mutating lint command completed successfully.
 ```
 
+The Build Check outputs a block of the same shape. A passing result looks like:
+
+```
+Build Check: PASS
+Build Command: sh build.sh
+Isolation: disposable copy of current project state
+Result: build completed successfully; dist/artifact.txt generated; exit status 0
+Reason: The project-defined local build succeeded in isolation without modifying the original repository.
+```
+
 ## How It Works
 
 ShipCheck is a **project-level Factory Skill**. Its entry point lives at:
@@ -126,6 +166,8 @@ ShipCheck is a **project-level Factory Skill**. Its entry point lives at:
 - The Test Check may execute at most one existing, project-defined, safe, non-interactive test command when the repository provides enough evidence to identify it confidently. It does not invent commands, install dependencies, or automatically fix failures.
 
 - The Lint Check may execute at most one existing project-defined lint/static-analysis command, but only after inspecting the underlying workflow and establishing that it is non-mutating. It returns BLOCKED rather than executing a mutating or ambiguous workflow.
+
+- The Build Check may execute at most one existing project-defined local build command. Because normal builds may intentionally generate files, ShipCheck first reproduces the current project state in a disposable workspace; the build executes only there; expected build artifacts may be created inside that workspace; the workspace is removed afterward; and the original repository is verified unchanged. Unsafe deploy/publish/upload workflows and unavailable required tooling return BLOCKED instead of being executed or misclassified. The disposable workspace is project-tree filesystem isolation, not a full OS sandbox.
 
 ## Quickstart
 
@@ -198,11 +240,52 @@ We performed a set of behavioral tests of the Lint Check:
 
 This demonstrates the Lint Check evaluates both the result of safe command execution and whether ShipCheck has enough safety and authority to execute a command in the first place.
 
+### Build Check
+
+We performed a set of behavioral tests of the Build Check:
+
+1. **Factory ShipCheck repository with no build workflow → NOT FOUND.**
+   - No project-defined build command existed.
+   - ShipCheck did not invent a command.
+   - No disposable workspace was created.
+   - No build command was executed.
+2. **Dependency-free build demo with one canonical command `sh build.sh` → PASS.**
+   - The build intentionally creates `dist/artifact.txt` inside its current working directory.
+   - ShipCheck identified the command from `README.md`, inspected `build.sh`, and determined it was a local build with relative workspace-local writes.
+   - It reproduced the current project state in a disposable workspace, ran `sh build.sh` only inside that workspace, and observed `dist/artifact.txt` containing `ShipCheck build demo source`.
+   - It observed exit status 0, removed the disposable workspace, and verified the original repository still had no `dist/`.
+   - Build Check → PASS.
+3. **Same build demo with `source.txt` deleted from the CURRENT working tree → FAIL.**
+   - The committed HEAD still contained `source.txt`.
+   - ShipCheck did NOT reconstruct `source.txt` from HEAD.
+   - The disposable workspace represented the current on-disk state, so `source.txt` remained absent.
+   - `sh build.sh` actually ran inside isolation; required shell tooling was available.
+   - The build reported `source.txt` was missing and exited 1.
+   - The failure was attributable to the current project state, not missing environment/tooling.
+   - Build Check → FAIL.
+4. **Exact committed `source.txt` restored → PASS again.**
+   - The same build workflow ran in isolation.
+   - `dist/artifact.txt` was generated in the disposable workspace.
+   - Exit status 0; the disposable workspace was removed; the original repo remained clean.
+   - Build Check → PASS.
+5. **Temporary documented build workflow `sh build-release.sh` → BLOCKED.**
+   - The wrapper contained `sh build.sh` followed by an outbound `curl` HTTP POST uploading `dist/artifact.txt`.
+   - ShipCheck identified the documented build workflow and inspected the wrapper before execution.
+   - It recognized the remote upload/publication side effect.
+   - It did NOT create a disposable workspace, did NOT run `build-release.sh`, did NOT run `build.sh`, did NOT run `curl`, and made no network request.
+   - Build Check → BLOCKED.
+6. **Temporary documented build workflow `sh build-tooling.sh` → BLOCKED.**
+   - The script required a deliberately unavailable local executable `shipcheck_demo_build_tool_9f3c7a`.
+   - ShipCheck identified the documented workflow, inspected the required tooling, and checked availability with a read-only command lookup.
+   - It confirmed the tool was unavailable, did NOT install or create the tool, did NOT execute the build workflow, and did NOT create a disposable workspace.
+   - Build Check → BLOCKED.
+
+These experiments demonstrate three separate Build Check responsibilities: discovering the project's real build workflow, safely isolating legitimate build-time filesystem mutations, and distinguishing project build failures from conditions where execution should be BLOCKED.
+
 ## Roadmap
 
 The following checks are **planned** and will be added incrementally. They are not currently implemented:
 
-- build
 - documentation
 - security/configuration
 - release readiness summary
@@ -213,4 +296,4 @@ This project is being built and tested with Factory Droid. The initial developme
 
 ## Status
 
-ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check's BLOCKED behavior has been tested for both mutating workflows and ambiguous workflows. The remaining roadmap checks are not yet implemented.
+ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check isolation was behaviorally tested by allowing build artifacts to be generated in a disposable workspace while the original repository remained clean. The Build Check BLOCKED behavior was tested for both remote publication/upload side effects and unavailable required tooling. Documentation, security/configuration, and release-readiness-summary checks are not yet implemented.
