@@ -1,6 +1,6 @@
 # Factory ShipCheck
 
-ShipCheck is a reusable project-level Factory Skill for performing pre-ship readiness checks with Droid. It currently implements Git-state and automated-test readiness checks, and reports whether a project passes the current readiness criteria. The full release-readiness roadmap is not yet complete.
+ShipCheck is a reusable project-level Factory Skill for performing pre-ship readiness checks with Droid. It currently implements Git-state, automated-test, and lint/static-analysis readiness checks, and reports whether a project passes the current readiness criteria. The full release-readiness roadmap is not yet complete.
 
 ## Why I Built This
 
@@ -8,7 +8,7 @@ This project is being built while learning Factory/Droid incrementally. Each cap
 
 ## Current Capabilities
 
-Two checks are implemented so far: the **Git State Check** and the **Test Check**.
+Three checks are implemented so far: the **Git State Check**, the **Test Check**, and the **Lint Check**.
 
 ### Git State Check
 
@@ -40,6 +40,30 @@ The Test Check has four possible results:
 - **BLOCKED** — an intended test workflow was found, but ShipCheck could not safely or unambiguously execute one command.
 
 Multiple equally valid test commands with no project-defined default produce **BLOCKED** rather than allowing Droid to guess.
+
+### Lint Check
+
+The Lint Check discovers an existing project-defined lint/static-analysis workflow, then runs the repository's own lint command. It:
+
+- prefers explicit documented/default commands,
+- inspects the underlying command or wrapper before execution,
+- refuses commands that would mutate files,
+- does not invent lint commands,
+- does not install lint tooling,
+- executes at most one safe, non-interactive, non-mutating command,
+- and does not automatically fix lint findings.
+
+The Lint Check has four possible results:
+
+- **PASS** — a project-defined safe lint workflow was identified, executed, and exited 0.
+- **FAIL** — a safe lint workflow was identified and executed, but returned nonzero due to lint/static-analysis findings.
+- **NOT FOUND** — no project-defined lint/static-analysis workflow could be confidently identified.
+- **BLOCKED** — the lint workflow could not safely or unambiguously be executed.
+
+Two BLOCKED reasons we behaviorally tested:
+
+1. The project-defined lint command is mutating.
+2. Multiple equally valid lint commands exist and the project defines no default.
 
 ## Example Output
 
@@ -78,6 +102,15 @@ Reason: The repository's documented canonical test command completed successfull
 
 The Test Check classifies a repository as one of **PASS**, **FAIL**, **NOT FOUND**, or **BLOCKED**, based on whether a test workflow was identified and, if so, whether the repository's own test command completed successfully, failed, or could not be safely executed.
 
+The Lint Check outputs a block of the same shape. A passing result looks like:
+
+```
+Lint Check: PASS
+Lint Command: sh lint.sh
+Result: lint PASS: app.sh does not contain marker "LINT_ERROR"; exit status 0
+Reason: The repository's documented non-mutating lint command completed successfully.
+```
+
 ## How It Works
 
 ShipCheck is a **project-level Factory Skill**. Its entry point lives at:
@@ -91,6 +124,8 @@ ShipCheck is a **project-level Factory Skill**. Its entry point lives at:
 - The Git State Check uses only read-only Git inspection commands (`git rev-parse --abbrev-ref HEAD`, `git status --porcelain`, and `git diff --name-only --diff-filter=U`).
 
 - The Test Check may execute at most one existing, project-defined, safe, non-interactive test command when the repository provides enough evidence to identify it confidently. It does not invent commands, install dependencies, or automatically fix failures.
+
+- The Lint Check may execute at most one existing project-defined lint/static-analysis command, but only after inspecting the underlying workflow and establishing that it is non-mutating. It returns BLOCKED rather than executing a mutating or ambiguous workflow.
 
 ## Quickstart
 
@@ -127,11 +162,46 @@ We performed a set of behavioral tests of the Test Check:
 
 This demonstrates the Test Check responds to repository evidence and actual command execution rather than producing a static classification.
 
+### Lint Check
+
+We performed a set of behavioral tests of the Lint Check:
+
+1. **Factory ShipCheck repository with no lint workflow → NOT FOUND.**
+   - No project-defined lint command existed.
+   - ShipCheck did not invent or run a linter.
+2. **Dependency-free lint demo with one documented canonical command `sh lint.sh` → PASS.**
+   - ShipCheck inspected the underlying script before execution.
+   - The script was established as read-only/non-mutating.
+   - It executed and exited 0.
+   - Lint Check → PASS.
+3. **Same lint demo with exactly one temporary lint marker `# LINT_ERROR` → FAIL.**
+   - The same lint command executed.
+   - It reported the finding.
+   - It exited 1.
+   - Lint Check → FAIL.
+4. **Exact committed `app.sh` restored → PASS again.**
+   - The same lint command executed.
+   - It exited 0.
+   - Lint Check → PASS.
+5. **Temporary project-defined mutating lint workflow `sh lint-fix.sh` → BLOCKED.**
+   - ShipCheck identified the documented command.
+   - ShipCheck inspected `lint-fix.sh` before execution.
+   - The script contained an append redirect that would modify `app.sh`.
+   - ShipCheck did not execute the command.
+   - `app.sh` remained unchanged.
+   - Lint Check → BLOCKED.
+6. **Temporary ambiguity state with two equally valid, safe lint commands `sh lint.sh` and `sh lint-alt.sh` → BLOCKED.**
+   - Both were independently verified as safe and passing.
+   - The README explicitly defined neither as preferred or canonical.
+   - ShipCheck executed neither command.
+   - Lint Check → BLOCKED.
+
+This demonstrates the Lint Check evaluates both the result of safe command execution and whether ShipCheck has enough safety and authority to execute a command in the first place.
+
 ## Roadmap
 
 The following checks are **planned** and will be added incrementally. They are not currently implemented:
 
-- lint
 - build
 - documentation
 - security/configuration
@@ -143,4 +213,4 @@ This project is being built and tested with Factory Droid. The initial developme
 
 ## Status
 
-ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The remaining roadmap checks are not yet implemented.
+ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check's BLOCKED behavior has been tested for both mutating workflows and ambiguous workflows. The remaining roadmap checks are not yet implemented.
