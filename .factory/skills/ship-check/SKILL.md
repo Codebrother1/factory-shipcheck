@@ -11,7 +11,7 @@ ShipCheck will become a reusable pre-ship review workflow for checking a project
 
 ## Current Version
 
-ShipCheck currently implements the Git State Check, Test Check, and Lint Check. Build, documentation, security/configuration, and release-summary checks are planned and will be added incrementally in later steps.
+ShipCheck currently implements the Git State Check, Test Check, Lint Check, and Build Check. Documentation, security/configuration, and release-summary checks are planned and will be added incrementally in later steps.
 
 ## Git State Check
 
