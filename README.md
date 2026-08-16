@@ -88,7 +88,9 @@ ShipCheck is a **project-level Factory Skill**. Its entry point lives at:
 
 - The Skill's frontmatter `description` helps Droid decide when the workflow applies (for example, when a user asks for a pre-ship or release-readiness review).
 - The Skill body defines the actual readiness workflow: what to inspect, how to interpret it, and the PASS/FAIL criteria.
-- When the Skill applies, Droid uses only the read-only Git inspection commands currently defined by the Skill (`git rev-parse --abbrev-ref HEAD`, `git status --porcelain`, and `git diff --name-only --diff-filter=U`).
+- The Git State Check uses only read-only Git inspection commands (`git rev-parse --abbrev-ref HEAD`, `git status --porcelain`, and `git diff --name-only --diff-filter=U`).
+
+- The Test Check may execute at most one existing, project-defined, safe, non-interactive test command when the repository provides enough evidence to identify it confidently. It does not invent commands, install dependencies, or automatically fix failures.
 
 ## Quickstart
 
