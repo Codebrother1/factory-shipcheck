@@ -1,6 +1,6 @@
 # Factory ShipCheck
 
-ShipCheck is a reusable project-level Factory Skill for performing pre-ship readiness checks with Droid. It currently implements Git-state, automated-test, lint/static-analysis, and build readiness checks, and reports whether a project passes the current readiness criteria. The full release-readiness roadmap is not yet complete.
+ShipCheck is a reusable project-level Factory Skill for performing pre-ship readiness checks with Droid. It currently implements Git-state, automated-test, lint/static-analysis, build, and documentation readiness checks, and reports whether a project passes the current readiness criteria. The full release-readiness roadmap is not yet complete.
 
 ## Why I Built This
 
@@ -8,7 +8,7 @@ This project is being built while learning Factory/Droid incrementally. Each cap
 
 ## Current Capabilities
 
-Four checks are implemented so far: the **Git State Check**, the **Test Check**, the **Lint Check**, and the **Build Check**.
+Five checks are implemented so far: the **Git State Check**, the **Test Check**, the **Lint Check**, the **Build Check**, and the **Documentation Check**.
 
 ### Git State Check
 
@@ -95,6 +95,32 @@ Two BLOCKED reasons we behaviorally tested:
 
 A nonzero exit is not automatically FAIL. Missing tooling, dependencies, secrets, required services, or environment requirements can produce BLOCKED rather than FAIL.
 
+### Documentation Check
+
+The Documentation Check identifies the repository's canonical release-facing documentation and verifies that its mechanically verifiable claims are consistent with the current repository state. It:
+
+- identifies canonical project documentation,
+- defaults to root `README.md` when no stronger project-defined authority exists,
+- evaluates CURRENT on-disk documentation rather than silently substituting HEAD,
+- verifies only explicit mechanically verifiable claims,
+- uses concrete repository evidence,
+- verifies current local paths / entry points,
+- verifies explicitly canonical/default commands without executing them,
+- checks explicit capability / Status / Roadmap consistency,
+- distinguishes examples from current project claims,
+- distinguishes planned/future language from implemented/current language,
+- does not judge grammar, writing quality, marketing language, or subjective completeness,
+- does not fetch external links for this first version,
+- does not automatically fix documentation,
+- and is read-only.
+
+The Documentation Check has four possible results:
+
+- **PASS** — canonical documentation was identified and all mechanically verifiable claims within scope were consistent.
+- **FAIL** — canonical documentation was identified and one or more explicit mechanically verifiable claims contradicted current repository evidence.
+- **NOT FOUND** — no canonical project/release-facing documentation entry point could be confidently identified.
+- **BLOCKED** — documentation exists but ShipCheck cannot confidently determine documentation authority or verify the relevant claims without guessing.
+
 ## Example Output
 
 The ShipCheck Git State Check outputs a fixed, concise block. A passing result looks like:
@@ -168,6 +194,8 @@ ShipCheck is a **project-level Factory Skill**. Its entry point lives at:
 - The Lint Check may execute at most one existing project-defined lint/static-analysis command, but only after inspecting the underlying workflow and establishing that it is non-mutating. It returns BLOCKED rather than executing a mutating or ambiguous workflow.
 
 - The Build Check may execute at most one existing project-defined local build command. Because normal builds may intentionally generate files, ShipCheck first reproduces the current project state in a disposable workspace; the build executes only there; expected build artifacts may be created inside that workspace; the workspace is removed afterward; and the original repository is verified unchanged. Unsafe deploy/publish/upload workflows and unavailable required tooling return BLOCKED instead of being executed or misclassified. The disposable workspace is project-tree filesystem isolation, not a full OS sandbox.
+
+- The Documentation Check performs a read-only reconciliation between explicit current documentation claims and concrete current repository evidence. It verifies only explicit mechanically verifiable claims (paths, entry points, canonical commands, capability/status/roadmap consistency) and distinguishes examples and planned language from current-state claims. It does not execute test/lint/build commands, fetch external links, or modify documentation.
 
 ## Quickstart
 
@@ -286,7 +314,6 @@ These experiments demonstrate three separate Build Check responsibilities: disco
 
 The following checks are **planned** and will be added incrementally. They are not currently implemented:
 
-- documentation
 - security/configuration
 - release readiness summary
 
@@ -296,4 +323,4 @@ This project is being built and tested with Factory Droid. The initial developme
 
 ## Status
 
-ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check isolation was behaviorally tested by allowing build artifacts to be generated in a disposable workspace while the original repository remained clean. The Build Check BLOCKED behavior was tested for both remote publication/upload side effects and unavailable required tooling. Documentation, security/configuration, and release-readiness-summary checks are not yet implemented.
+ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check isolation was behaviorally tested by allowing build artifacts to be generated in a disposable workspace while the original repository remained clean. The Build Check BLOCKED behavior was tested for both remote publication/upload side effects and unavailable required tooling. The Documentation Check is implemented. Documentation Check behavioral testing is in progress. Security/configuration and release-readiness-summary checks are not yet implemented.
