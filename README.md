@@ -1,6 +1,6 @@
 # Factory ShipCheck
 
-ShipCheck is a reusable project-level Factory Skill for performing pre-ship readiness checks with Droid. It currently implements Git-state, automated-test, lint/static-analysis, build, documentation, and security/configuration readiness checks, and reports whether a project passes the current readiness criteria. The full release-readiness roadmap is not yet complete.
+ShipCheck is a reusable project-level Factory Skill for performing pre-ship readiness checks with Droid. It currently implements six readiness checks (Git State, Test, Lint, Build, Documentation, and Security / Configuration) plus the Release Readiness Summary orchestrator, and reports whether a project passes the current readiness criteria. The current ShipCheck readiness roadmap is implemented.
 
 ## Why I Built This
 
@@ -8,7 +8,7 @@ This project is being built while learning Factory/Droid incrementally. Each cap
 
 ## Current Capabilities
 
-Six checks are implemented so far: the **Git State Check**, the **Test Check**, the **Lint Check**, the **Build Check**, the **Documentation Check**, and the **Security / Configuration Check**.
+Six readiness checks are implemented, plus the **Release Readiness Summary** orchestrator that aggregates them: the **Git State Check**, the **Test Check**, the **Lint Check**, the **Build Check**, the **Documentation Check**, and the **Security / Configuration Check**.
 
 ### Git State Check
 
@@ -167,6 +167,36 @@ The Security / Configuration Check has four possible results:
 - **NOT FOUND** — no meaningful security/configuration surface within v1 scope was identified.
 - **BLOCKED** — relevant security/configuration evidence exists, but ShipCheck cannot safely or confidently classify it without crossing a forbidden/unavailable boundary or guessing.
 
+### Release Readiness Summary
+
+The Release Readiness Summary is an orchestrator over the six existing checks, not a seventh independent repository check. It:
+
+- runs the six checks in their Skill-defined order,
+- preserves each check's native result exactly,
+- does not invent a seventh inspection domain,
+- does not weaken any underlying check's safety rules,
+- runs all six by default unless an orchestration-safety problem makes later results unreliable,
+- verifies original-repository state integrity between checks,
+- does not auto-reset/stash/restore unexpected mutations,
+- preserves Security / Configuration redaction boundaries,
+- and performs no release actions.
+
+The Release Readiness Summary has four possible results:
+
+- **READY** — all six underlying checks returned PASS. READY means ready within ShipCheck's current six-check readiness scope, not universally risk-free.
+- **NOT READY** — one or more underlying checks returned FAIL.
+- **BLOCKED** — no FAIL exists, but one or more checks returned BLOCKED, or an orchestration-safety problem prevents reliable completion.
+- **INCOMPLETE** — no FAIL or BLOCKED exists, but one or more underlying checks returned NOT FOUND.
+
+The deterministic precedence is:
+
+- any FAIL → NOT READY
+- else any BLOCKED → BLOCKED
+- else any NOT FOUND → INCOMPLETE
+- else all six PASS → READY
+
+Native results are preserved: NOT FOUND is not rewritten as FAIL, BLOCKED is not rewritten, and unfavorable results are not hidden.
+
 ## Example Output
 
 The ShipCheck Git State Check outputs a fixed, concise block. A passing result looks like:
@@ -263,6 +293,8 @@ ShipCheck is a **project-level Factory Skill**. Its entry point lives at:
 - The Documentation Check performs a read-only reconciliation between explicit current documentation claims and concrete current repository evidence. It verifies only explicit mechanically verifiable claims (paths, entry points, canonical commands, capability/status/roadmap consistency) and distinguishes examples and planned language from current-state claims. It does not execute test/lint/build commands, fetch external links, or modify documentation.
 
 - The Security / Configuration Check inspects current non-ignored project state read-only, identifies a narrow high-confidence security/configuration surface, applies placeholder/example/fixture protections, never uses entropy-only guessing, refuses to follow security-relevant symlinks outside the repository, and reports sensitive findings using redacted metadata only.
+
+- The Release Readiness Summary orchestrates the six existing checks in Skill-defined order. Each check retains its own discovery, current-state, execution, and safety rules. Native results are collected without rewriting, and the deterministic precedence produces the release-level result. No tag, release, publication, push, or deploy action is performed.
 
 ## Quickstart
 
@@ -474,9 +506,7 @@ These experiments demonstrate four separate responsibilities: distinguishing abs
 
 ## Roadmap
 
-The following checks are **planned** and will be added incrementally. They are not currently implemented:
-
-- release readiness summary
+The current ShipCheck readiness roadmap is implemented: six readiness checks plus the Release Readiness Summary orchestrator.
 
 ## Built With
 
@@ -484,4 +514,4 @@ This project is being built and tested with Factory Droid. The initial developme
 
 ## Status
 
-ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check isolation was behaviorally tested by allowing build artifacts to be generated in a disposable workspace while the original repository remained clean. The Build Check BLOCKED behavior was tested for both remote publication/upload side effects and unavailable required tooling. The Documentation Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Documentation Check's current-state behavior was tested with a corrected but uncommitted README. The Documentation Check's BLOCKED behavior was tested with an explicit non-authoritative generated README whose declared authoritative source was unavailable. The Security / Configuration Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Security / Configuration Check secret-output redaction was behaviorally verified. The Security / Configuration Check's external-symlink safety boundary was behaviorally verified. Release-readiness-summary is the only remaining planned check.
+ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check isolation was behaviorally tested by allowing build artifacts to be generated in a disposable workspace while the original repository remained clean. The Build Check BLOCKED behavior was tested for both remote publication/upload side effects and unavailable required tooling. The Documentation Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Documentation Check's current-state behavior was tested with a corrected but uncommitted README. The Documentation Check's BLOCKED behavior was tested with an explicit non-authoritative generated README whose declared authoritative source was unavailable. The Security / Configuration Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Security / Configuration Check secret-output redaction was behaviorally verified. The Security / Configuration Check's external-symlink safety boundary was behaviorally verified. The Release Readiness Summary is implemented. Release Readiness Summary behavioral testing is in progress. Its NOT READY aggregation has been behaviorally exercised with Git State PASS, Documentation FAIL, four NOT FOUND results, all six checks still executed, native results preserved, counts summing to six, and final result NOT READY via FAIL precedence.
