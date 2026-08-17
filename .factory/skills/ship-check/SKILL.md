@@ -11,7 +11,7 @@ ShipCheck will become a reusable pre-ship review workflow for checking a project
 
 ## Current Version
 
-ShipCheck currently implements the Git State Check, Test Check, Lint Check, and Build Check. Documentation, security/configuration, and release-summary checks are planned and will be added incrementally in later steps.
+ShipCheck currently implements the Git State Check, Test Check, Lint Check, Build Check, and Documentation Check. Security/configuration and release-summary checks are planned and will be added incrementally in later steps.
 
 ## Git State Check
 
@@ -423,3 +423,156 @@ Isolation: <short isolation description or none>
 Result: <short result>
 Reason: <one short explanation>
 ```
+
+## Documentation Check
+
+Identify the repository's canonical release-facing documentation and determine whether its mechanically verifiable claims are consistent with the CURRENT repository state. This is not a "does README exist" check. Verify only explicit claims that can be grounded in concrete repository evidence. Read-only for this first version.
+
+### Intent
+
+Determine whether the project's canonical documentation is consistent with the current repository state, by verifying explicit mechanically verifiable claims rather than judging writing quality or completeness.
+
+### Canonical documentation discovery
+
+1. Prefer explicit repository/project configuration that identifies documentation authority.
+2. Otherwise, a root `README.md` is the default canonical project documentation entry point.
+3. Supporting documents may include `docs/`, `CONTRIBUTING.md`, `CHANGELOG.md`, `LICENSE`, and other explicitly referenced project documentation.
+4. Supporting implementation evidence may include project configuration, manifests, scripts, and the project-level Factory Skill.
+5. In a monorepo, prefer an explicitly documented/configured repository-level documentation root. If no explicit authority exists, root `README.md` remains the default. If genuinely competing canonical documentation roots exist and authority cannot be resolved, return BLOCKED rather than guessing.
+
+### Current-state definition
+
+Documentation Check evaluates CURRENT on-disk contents. If `README.md` or another canonical document has uncommitted edits, inspect those current contents. Do not silently substitute HEAD.
+
+### Implementation evidence
+
+A capability counts as concrete implementation evidence only when current repository structure explicitly defines it. Examples:
+
+- an actual section/workflow/configuration implementing that named capability,
+- a concrete project command/target/script,
+- an existing documented entry-point file.
+
+For ShipCheck specifically, an actual named check section in current `SKILL.md` is valid implementation evidence. Merely mentioning a capability in prose is not enough.
+
+### Claim extraction
+
+Inspect only atomic, explicit, mechanically verifiable claims. Strong candidates include claims containing:
+
+- exact repository paths,
+- exact local file names,
+- exact canonical/default command names,
+- exact capability names under Current Capabilities / Status / Roadmap,
+- explicit words such as implemented, planned, not implemented, canonical, default, entry point,
+- required relative repository links.
+
+Do NOT treat every prose sentence or code block as a claim.
+
+### Verification categories
+
+1. **Local paths / entry points** — if canonical docs explicitly state that a path exists as a current project file, directory, Skill entry point, script, config, or other repository resource, verify that path in the current working tree. A missing required path is a FAIL finding.
+2. **Canonical commands** — if docs explicitly identify a command as current/canonical/default, verify the corresponding project-defined script/target/manifest evidence exists. Do NOT execute the command. If command authority is ambiguous, return BLOCKED when necessary rather than guessing.
+3. **Capability / status / roadmap consistency** — compare explicit current-capability/status/roadmap statements against clear implementation evidence. Only report a contradiction when both sides are explicit.
+4. **Required relative documentation links** — verify required local relative links that point to repository files/directories. Do not fetch external HTTP/HTTPS links in this first version. Do not fail merely because an external link was not checked.
+5. **Documented entry-point consistency** — paths such as `.factory/skills/...` should resolve when described as actual entry points.
+6. **Negative claims** — verify only bounded, concrete negative claims when repository evidence can establish them confidently (e.g., "there is no package.json", "Build Check is not implemented"). Do not turn broad statements such as "there are no dependencies of any kind" into failures unless an explicit concrete contradiction is present.
+
+### Capability / status / roadmap consistency
+
+Only report a contradiction when both sides are explicit.
+
+Examples:
+
+- FAIL: README says "Lint Check is planned/not implemented" and current `SKILL.md` contains an actual implemented `## Lint Check`.
+- FAIL: README says "Build Check is implemented" and no concrete Build Check implementation evidence exists.
+
+A roadmap contradiction exists only when canonical docs explicitly identify a named capability as planned/not implemented AND current repository evidence explicitly implements that same named capability. Do not infer implementation merely from language/framework/config presence. Do not infer project intent. Do not fail merely because ShipCheck thinks a feature ought to be documented.
+
+### Examples / future language / false-positive safety
+
+Distinguish:
+
+- examples from statements of current project state,
+- optional commands from canonical/default commands,
+- future/planned language from implemented/current language,
+- illustrative code snippets from project-defined commands.
+
+A code block alone is not a current canonical command unless surrounding documentation explicitly says it is.
+
+Documentation Check must NOT judge grammar, style, writing quality, marketing language, subjective completeness, whether more documentation should exist, screenshot freshness, external-link uptime, or undocumented behavior merely because Droid believes it should be documented. Require concrete evidence before declaring FAIL.
+
+### Generated documentation and authority
+
+If the repository explicitly declares that checked-in documentation is generated and identifies a different authoritative source, use the declared source of truth when it is locally available and verifiable. If authority depends on unavailable tooling/private external sources or cannot be resolved confidently, return BLOCKED. Otherwise treat current checked-in canonical documentation as the documentation being verified.
+
+### Decision rules
+
+1. Inspect current repository state read-only.
+2. Identify canonical documentation.
+3. If none can be confidently identified, return NOT FOUND.
+4. If documentation authority is genuinely ambiguous, return BLOCKED.
+5. Extract only explicit verifiable claims within this first-version scope.
+6. Gather concrete current repository evidence.
+7. If a claim and evidence explicitly contradict one another, record a finding.
+8. One or more confirmed findings, return FAIL.
+9. No confirmed findings, return PASS.
+10. When intent or authority must be guessed, return BLOCKED rather than FAIL.
+
+### Execution safety
+
+Documentation Check is read-only. Do NOT:
+
+- modify documentation,
+- automatically fix stale claims,
+- execute test/lint/build commands,
+- generate documentation,
+- install documentation tooling,
+- fetch external links for PASS/FAIL,
+- stage, commit, or push anything.
+
+### Results
+
+PASS when all of the following are true:
+
+- canonical project documentation was confidently identified,
+- every mechanically verifiable claim within the first-version scope was consistent with current repository evidence,
+- and no required local documentation references were broken.
+
+FAIL when all of the following are true:
+
+- canonical documentation was confidently identified,
+- and at least one explicit mechanically verifiable documentation claim contradicts current repository evidence.
+
+NOT FOUND when:
+
+- no canonical project/release-facing documentation entry point could be confidently identified.
+
+BLOCKED when:
+
+- documentation exists, but ShipCheck cannot confidently determine the authoritative documentation set or safely verify the relevant claims without guessing.
+
+### Findings format
+
+For every FAIL finding, show a concise record underneath the top-level block:
+
+```
+Finding <n>:
+Claim: <specific documentation claim>
+Evidence: <specific repository evidence>
+Issue: <short contradiction>
+```
+
+Do not overload the top-level block with every finding.
+
+### Output
+
+Output exactly the following top-level block, using PASS, FAIL, NOT FOUND, or BLOCKED as appropriate:
+
+```
+Documentation Check: PASS, FAIL, NOT FOUND, or BLOCKED
+Documentation: <canonical documentation path(s) or none>
+Issues: <count or unknown>
+Result: <short result>
+Reason: <one short explanation>
+```
+
+When there are findings, list them underneath the top-level block using the findings format above.
