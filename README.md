@@ -197,6 +197,8 @@ The deterministic precedence is:
 
 Native results are preserved: NOT FOUND is not rewritten as FAIL, BLOCKED is not rewritten, and unfavorable results are not hidden.
 
+All four Release Readiness Summary outcomes have now been behaviorally exercised. The matrix-derived counting invariant was regression-tested after a count defect was discovered during the BLOCKED experiment.
+
 ## Example Output
 
 The ShipCheck Git State Check outputs a fixed, concise block. A passing result looks like:
@@ -271,6 +273,32 @@ Issues: 0
 Result: no confirmed high-confidence security/configuration findings
 Reason: A meaningful tracked environment/configuration surface was inspected; its values were ordinary configuration, explicit placeholders, or variable references.
 ```
+
+The Release Readiness Summary outputs a block of the same shape. A READY result looks like:
+
+```
+Release Readiness: READY
+Checks: 6
+Passed: 6
+Failed: 0
+Not Found: 0
+Blocked: 0
+Result: READY
+Reason: All six authoritative ShipCheck checks returned PASS; the repository is ready within ShipCheck's current six-check readiness scope.
+```
+
+Then show the six-row matrix:
+
+```
+Git State: PASS
+Test: PASS
+Lint: PASS
+Build: PASS
+Documentation: PASS
+Security / Configuration: PASS
+```
+
+READY means ready within ShipCheck's current six-check readiness scope. It is not a universal guarantee that releasing is risk-free.
 
 ## How It Works
 
@@ -504,6 +532,172 @@ We performed a set of behavioral tests of the Security / Configuration Check:
 
 These experiments demonstrate four separate responsibilities: distinguishing absence of a meaningful security surface from a clean inspectable surface, recognizing high-confidence current security/configuration findings, avoiding false positives for placeholders and variable references, and enforcing safety boundaries and protecting sensitive material in ShipCheck's own output.
 
+### Release Readiness Summary
+
+We performed a behavioral sequence of the Release Readiness Summary across all four release-level outcomes:
+
+1. **Real Factory ShipCheck repository with stale README → NOT READY.**
+   - Native results were:
+
+```
+   Git State: PASS
+   Test: NOT FOUND
+   Lint: NOT FOUND
+   Build: NOT FOUND
+   Documentation: FAIL
+   Security / Configuration: NOT FOUND
+   ```
+   - All six checks actually ran.
+   - The Documentation FAIL did not short-circuit later Security / Configuration inspection.
+   - All four NOT FOUND results remained NOT FOUND.
+   - No native result was rewritten.
+   - Counts were: Passed: 1, Failed: 1, Not Found: 4, Blocked: 0.
+   - FAIL precedence produced: Release Readiness → NOT READY.
+   - The original repository remained unchanged.
+   - No release action occurred.
+   - This exercised FAIL precedence over NOT FOUND.
+2. **Same real Factory ShipCheck repository after the README correction was committed → INCOMPLETE.**
+   - Native results were:
+
+```
+   Git State: PASS
+   Test: NOT FOUND
+   Lint: NOT FOUND
+   Build: NOT FOUND
+   Documentation: PASS
+   Security / Configuration: NOT FOUND
+   ```
+   - All six checks ran.
+   - NOT FOUND did not short-circuit.
+   - NOT FOUND remained NOT FOUND rather than being rewritten as FAIL.
+   - Counts were: Passed: 2, Failed: 0, Not Found: 4, Blocked: 0.
+   - With no FAIL and no BLOCKED, NOT FOUND precedence produced: Release Readiness → INCOMPLETE.
+   - Counts summed to six.
+   - Repository state remained unchanged.
+   - This proved "missing workflow evidence" is INCOMPLETE rather than automatically NOT READY.
+3. **Dedicated release demo with unavailable required Build tooling → BLOCKED.**
+   - The clean committed demo produced these native results:
+
+```
+   Git State: PASS
+   Test: PASS
+   Lint: PASS
+   Build: BLOCKED
+   Documentation: PASS
+   Security / Configuration: PASS
+   ```
+   - README defined one canonical local build command.
+   - The workflow explicitly required the unavailable executable: `shipcheck_release_demo_build_tool_a91f42`.
+   - ShipCheck used read-only tooling lookup.
+   - Did not install or fabricate the missing tool.
+   - Did not execute `build.sh` after required-tool unavailability was established.
+   - Build Check → BLOCKED.
+   - Orchestration behavior: Documentation and Security / Configuration still ran after Build BLOCKED.
+   - All six native results were preserved.
+
+#### Counting defect discovered
+
+During the first BLOCKED Release Readiness run, the correct six-entry native matrix was:
+
+```
+   PASS
+   PASS
+   PASS
+   BLOCKED
+   PASS
+   PASS
+```
+
+but the top-level block incorrectly reported:
+
+```
+   Passed: 4
+```
+
+instead of:
+
+```
+   Passed: 5
+```
+
+The release-level BLOCKED verdict itself was correct, but the matrix/count invariant was violated. The Release Readiness Summary implementation was corrected so that:
+
+- the finalized six-entry native-result matrix is the single source of truth,
+- each matrix row increments exactly one bucket,
+- counts are derived by a deterministic one-pass tally,
+- matrix rows must equal 6,
+- Passed + Failed + Not Found + Blocked must equal 6,
+- any intermediate tally is reconciled from the finalized matrix before output,
+- the final block cannot be emitted until the invariant passes.
+
+#### Counting regression test
+
+The corrected Skill was copied into the SAME blocked release-demo scenario and rerun. The same matrix:
+
+```
+   Git State: PASS
+   Test: PASS
+   Lint: PASS
+   Build: BLOCKED
+   Documentation: PASS
+   Security / Configuration: PASS
+```
+
+then correctly emitted:
+
+```
+   Release Readiness: BLOCKED
+   Checks: 6
+   Passed: 5
+   Failed: 0
+   Not Found: 0
+   Blocked: 1
+```
+
+- The old `Passed: 4` defect did not recur.
+- The counts exactly matched the matrix.
+- 5 + 0 + 0 + 1 = 6.
+- The repository remained unchanged.
+
+4. **Same release demo after Build was changed to a safe dependency-free local build → READY.**
+   - The committed final demo state: Git State clean, Test canonical command passes, Lint canonical non-mutating command passes, Build is a dependency-free local build, Build reads `source.txt`, creates `dist/artifact.txt`, verifies artifact matches source, has no deploy/publish/upload/network/install/Git side effects, Build Check executes it only inside the existing disposable workspace, Documentation accurately describes current project state, tracked non-ignored `.env` remains a meaningful clean Security / Configuration surface with only ordinary configuration, explicit placeholder, and variable reference.
+   - The final native matrix was:
+
+```
+   Git State: PASS
+   Test: PASS
+   Lint: PASS
+   Build: PASS
+   Documentation: PASS
+   Security / Configuration: PASS
+   ```
+   - The actual emitted Release Readiness block was:
+
+```
+   Release Readiness: READY
+   Checks: 6
+   Passed: 6
+   Failed: 0
+   Not Found: 0
+   Blocked: 0
+   ```
+   - All six checks actually ran.
+   - All native results were preserved.
+   - Finalized matrix contained exactly six rows.
+   - Deterministic counters were derived from that matrix.
+   - 6 + 0 + 0 + 0 = 6.
+   - The previous counting defect did not recur.
+   - Build ran only inside its disposable workspace.
+   - No build artifact remained in the original repository.
+   - Repository state matched the start.
+   - Security redaction boundaries remained intact.
+   - No tag, release, publish, push, deploy, or upload occurred.
+   - READY means ready within ShipCheck's current six-check readiness scope. It is not a universal guarantee that releasing is risk-free.
+
+#### Concluding release summary paragraph
+
+The Release Readiness Summary behavioral sequence demonstrates: preservation of six authoritative native results, deterministic precedence across mixed results, run-all behavior after normal unfavorable results, current-state and safety inheritance from each underlying check, repository-state integrity across orchestration, deterministic matrix-derived counting, and READY as a report rather than a release action.
+
 ## Roadmap
 
 The current ShipCheck readiness roadmap is implemented: six readiness checks plus the Release Readiness Summary orchestrator.
@@ -514,4 +708,4 @@ This project is being built and tested with Factory Droid. The initial developme
 
 ## Status
 
-ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check isolation was behaviorally tested by allowing build artifacts to be generated in a disposable workspace while the original repository remained clean. The Build Check BLOCKED behavior was tested for both remote publication/upload side effects and unavailable required tooling. The Documentation Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Documentation Check's current-state behavior was tested with a corrected but uncommitted README. The Documentation Check's BLOCKED behavior was tested with an explicit non-authoritative generated README whose declared authoritative source was unavailable. The Security / Configuration Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Security / Configuration Check secret-output redaction was behaviorally verified. The Security / Configuration Check's external-symlink safety boundary was behaviorally verified. The Release Readiness Summary is implemented. Release Readiness Summary behavioral testing is in progress. Its NOT READY aggregation has been behaviorally exercised with Git State PASS, Documentation FAIL, four NOT FOUND results, all six checks still executed, native results preserved, counts summing to six, and final result NOT READY via FAIL precedence.
+ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check isolation was behaviorally tested by allowing build artifacts to be generated in a disposable workspace while the original repository remained clean. The Build Check BLOCKED behavior was tested for both remote publication/upload side effects and unavailable required tooling. The Documentation Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Documentation Check's current-state behavior was tested with a corrected but uncommitted README. The Documentation Check's BLOCKED behavior was tested with an explicit non-authoritative generated README whose declared authoritative source was unavailable. The Security / Configuration Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Security / Configuration Check secret-output redaction was behaviorally verified. The Security / Configuration Check's external-symlink safety boundary was behaviorally verified. The Release Readiness Summary is implemented and behaviorally tested across READY, NOT READY, INCOMPLETE, and BLOCKED. Release Summary run-all behavior was behaviorally verified. Native-result preservation was behaviorally verified. Matrix-derived counting was behaviorally verified after the discovered count defect was fixed. The corrected 5-PASS + 1-BLOCKED regression case was verified. The final all-six-PASS READY case was verified. The current ShipCheck readiness roadmap is implemented and behaviorally exercised end-to-end.
