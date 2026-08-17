@@ -121,6 +121,8 @@ The Documentation Check has four possible results:
 - **NOT FOUND** — no canonical project/release-facing documentation entry point could be confidently identified.
 - **BLOCKED** — documentation exists but ShipCheck cannot confidently determine documentation authority or verify the relevant claims without guessing.
 
+All four Documentation Check outcomes have now been behaviorally exercised.
+
 ## Example Output
 
 The ShipCheck Git State Check outputs a fixed, concise block. A passing result looks like:
@@ -175,6 +177,16 @@ Build Command: sh build.sh
 Isolation: disposable copy of current project state
 Result: build completed successfully; dist/artifact.txt generated; exit status 0
 Reason: The project-defined local build succeeded in isolation without modifying the original repository.
+```
+
+The Documentation Check outputs a block of the same shape. A passing result looks like:
+
+```
+Documentation Check: PASS
+Documentation: README.md
+Issues: 0
+Result: PASS
+Reason: The current canonical README's explicit mechanically verifiable claims are consistent with current repository evidence.
 ```
 
 ## How It Works
@@ -310,6 +322,45 @@ We performed a set of behavioral tests of the Build Check:
 
 These experiments demonstrate three separate Build Check responsibilities: discovering the project's real build workflow, safely isolating legitimate build-time filesystem mutations, and distinguishing project build failures from conditions where execution should be BLOCKED.
 
+### Documentation Check
+
+We performed a set of behavioral tests of the Documentation Check:
+
+1. **Real Factory ShipCheck repository with stale committed README → FAIL.**
+   - Current `SKILL.md` implemented five checks, including the Documentation Check.
+   - `README.md` still said four checks were implemented.
+   - The README Roadmap still listed documentation as planned/not implemented.
+   - The README Status still said Documentation was not yet implemented.
+   - ShipCheck treated root `README.md` as canonical, used current `SKILL.md` as concrete implementation evidence, and verified other explicit claims such as the Skill entry-point path.
+   - It identified exactly three explicit capability/status/roadmap contradictions: the implemented capability count/current capabilities, the Roadmap still treating Documentation as planned, and the Status still treating Documentation as unimplemented.
+   - It did not judge writing quality or subjective completeness, made no repository changes, executed no Test/Lint/Build commands, and fetched no external links.
+   - Documentation Check → FAIL.
+2. **Same real repository with README corrected in the CURRENT working tree but NOT committed → PASS.**
+   - HEAD still contained the stale README.
+   - The on-disk working-tree README had the correction.
+   - ShipCheck read the current README directly from disk; HEAD was used only as supporting comparison evidence.
+   - The current README documented five checks, Documentation was removed from the Roadmap, and Status described the Documentation Check as implemented with behavioral testing in progress.
+   - No explicit mechanically verifiable contradictions remained; Issues: 0.
+   - Documentation Check → PASS.
+   - The pre-existing uncommitted README modification remained untouched.
+   - This demonstrated the Documentation Check evaluates current on-disk documentation rather than silently substituting HEAD.
+3. **Documentation demo with no canonical project documentation → NOT FOUND.**
+   - The committed demo contained only `app.sh` and `.factory/skills/ship-check/SKILL.md`.
+   - There was no README, no `docs/`, no CONTRIBUTING, no CHANGELOG, no LICENSE, and no explicit documentation-authority configuration.
+   - ShipCheck searched for canonical/release-facing documentation and correctly treated `SKILL.md` as workflow/implementation evidence rather than automatically promoting it to project documentation.
+   - It created no documentation and changed nothing.
+   - Documentation Check → NOT FOUND.
+   - Absence of canonical documentation is NOT FOUND, not FAIL.
+4. **Same documentation demo with a temporary generated/non-authoritative README → BLOCKED.**
+   - The temporary README explicitly stated it was generated output, that it was not the authoritative project documentation, and that the authoritative documentation lived outside the repository in a private documentation system unavailable from the local checkout.
+   - ShipCheck found the README entry point, respected its explicit disclaimer of authority, and recognized that a different authoritative source was declared.
+   - It confirmed that source was unavailable locally, did not treat the generated README as authoritative, did not invent or reconstruct the private source, did not fetch external/private documentation, and did not report a false contradiction.
+   - It made no repository changes.
+   - Documentation Check → BLOCKED.
+   - This is not NOT FOUND because documentation plus an explicit authority declaration existed; not FAIL because no concrete contradiction with authoritative documentation was established; and not PASS because the authoritative source could not be inspected. Therefore BLOCKED.
+
+These experiments demonstrate four distinct Documentation Check responsibilities: identifying documentation authority, reconciling explicit documentation claims with concrete repository evidence, evaluating current uncommitted documentation rather than only HEAD, and refusing to guess when documentation authority cannot be resolved.
+
 ## Roadmap
 
 The following checks are **planned** and will be added incrementally. They are not currently implemented:
@@ -323,4 +374,4 @@ This project is being built and tested with Factory Droid. The initial developme
 
 ## Status
 
-ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check isolation was behaviorally tested by allowing build artifacts to be generated in a disposable workspace while the original repository remained clean. The Build Check BLOCKED behavior was tested for both remote publication/upload side effects and unavailable required tooling. The Documentation Check is implemented. Documentation Check behavioral testing is in progress. Security/configuration and release-readiness-summary checks are not yet implemented.
+ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check isolation was behaviorally tested by allowing build artifacts to be generated in a disposable workspace while the original repository remained clean. The Build Check BLOCKED behavior was tested for both remote publication/upload side effects and unavailable required tooling. The Documentation Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Documentation Check's current-state behavior was tested with a corrected but uncommitted README. The Documentation Check's BLOCKED behavior was tested with an explicit non-authoritative generated README whose declared authoritative source was unavailable. Security/configuration and release-readiness-summary checks are not yet implemented.
