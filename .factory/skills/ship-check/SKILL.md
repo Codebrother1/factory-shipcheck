@@ -11,7 +11,7 @@ ShipCheck will become a reusable pre-ship review workflow for checking a project
 
 ## Current Version
 
-ShipCheck currently implements the Git State Check, Test Check, Lint Check, Build Check, Documentation Check, and Security / Configuration Check. Release-summary checks are planned and will be added incrementally in later steps.
+ShipCheck currently implements the Git State Check, Test Check, Lint Check, Build Check, Documentation Check, Security / Configuration Check, and Release Readiness Summary. The current ShipCheck readiness roadmap is implemented.
 
 ## Git State Check
 
@@ -799,3 +799,182 @@ Reason: <one short explanation>
 ```
 
 When there are findings, list them underneath the top-level block using the findings format above.
+
+## Release Readiness Summary
+
+The Release Readiness Summary is an orchestrator over the six existing ShipCheck checks. It is not a seventh independent repository detector. It executes those checks according to their own current definitions, preserves each native result exactly, and aggregates the six results into one deterministic release-level result. It must never weaken, replace, bypass, or reinterpret an underlying check's rules.
+
+### Intent
+
+Provide a single deterministic release-readiness verdict by executing the six authoritative checks in order, preserving each native result, and aggregating without rewriting any check's outcome or safety boundaries.
+
+### Authoritative check set
+
+The six authoritative checks are:
+
+1. Git State Check
+2. Test Check
+3. Lint Check
+4. Build Check
+5. Documentation Check
+6. Security / Configuration Check
+
+Each check remains authoritative for its own domain. The summary does not duplicate or replace any check's discovery logic.
+
+### Release-level results
+
+Define exactly four release-level results:
+
+- **READY** — all six checks returned PASS. The repository is ready within ShipCheck's current six-check readiness scope. READY does not mean a release is universally safe or risk-free.
+- **NOT READY** — at least one confirmed check-level failure exists. A confirmed FAIL is sufficient to establish that the repository is not ready within ShipCheck's current readiness scope. Other BLOCKED or NOT FOUND results must still be displayed and preserved.
+- **INCOMPLETE** — no FAIL or BLOCKED exists, but at least one check returned NOT FOUND. ShipCheck does not invent project policy saying the missing workflow is a release failure. Evidence is incomplete.
+- **BLOCKED** — no check has FAILed, but at least one check could not be safely or confidently completed. ShipCheck therefore cannot complete the readiness determination.
+
+### Aggregation precedence
+
+Use this exact deterministic precedence:
+
+1. If any underlying check returns FAIL, the Release Readiness is NOT READY.
+2. Otherwise, if any underlying check returns BLOCKED, the Release Readiness is BLOCKED.
+3. Otherwise, if any underlying check returns NOT FOUND, the Release Readiness is INCOMPLETE.
+4. Only when all six underlying checks return PASS, the Release Readiness is READY.
+
+### No result rewriting
+
+Preserve each underlying native result exactly. Do not internally convert NOT FOUND to FAIL. Do not convert BLOCKED to FAIL or PASS. Do not suppress unfavorable results. The aggregation precedence determines the top-level verdict, but each check's native result is preserved in the matrix and detail lines.
+
+### Execution order
+
+Use this exact Skill-defined order:
+
+1. Git State Check
+2. Test Check
+3. Lint Check
+4. Build Check
+5. Documentation Check
+6. Security / Configuration Check
+
+Do not reorder an underlying check merely to optimize the summary.
+
+### Run-all / safety-stop behavior
+
+By default, run all six checks even after an unfavorable result. Specifically:
+
+- a Git State FAIL does not automatically stop later checks,
+- a Test/Lint/Build/etc. FAIL does not automatically stop later independent checks,
+- NOT FOUND does not short-circuit,
+- a normal check-level BLOCKED does not automatically short-circuit unrelated checks.
+
+The goal is to collect the full readiness picture.
+
+The one exception is orchestration safety. If the original repository state changes unexpectedly during orchestration such that later checks may no longer be evaluating the intended state, stop running further checks, do not auto-clean, do not reset, do not stash, do not restore, report top-level BLOCKED, preserve all results already collected, and identify the orchestration safety problem.
+
+### State-integrity verification
+
+Capture the original repository Git state before orchestration using read-only Git inspection (e.g., `git status --porcelain`). Before and after each underlying check, compare the original repository's Git-visible state. Use current repository state, not a requirement that the tree be clean. A dirty tree may be the legitimate starting state. The question is whether the check unexpectedly changed that state. Do not treat the pre-existing dirty state itself as orchestration contamination.
+
+For Build Check, expected build artifacts occur only in Build Check's disposable workspace; the original repository should remain unchanged. For read-only/non-mutating checks, an original-repository state change is unexpected. Do not invent automatic cleanup.
+
+### Current-state semantics
+
+Each check retains its own current-state rules. Do not create a synthetic shared HEAD snapshot. Preserve:
+
+- Git State: current Git state.
+- Test: current project-defined test workflow/state under Test Check rules.
+- Lint: current project-defined lint workflow/state under Lint Check rules.
+- Build: CURRENT on-disk state reproduced using Build Check's own disposable-workspace strategy.
+- Documentation: CURRENT on-disk canonical documentation.
+- Security / Configuration: CURRENT non-ignored in-scope repository content.
+
+### Safety inheritance
+
+The Release Readiness Summary inherits every existing safety rule. Do not duplicate or rewrite the domain checks.
+
+- Git State: read-only Git inspection.
+- Test: existing project-defined command only, no invented command, no installs, normal Test Check execution safety.
+- Lint: inspect underlying workflow, non-mutating only, mutating/ambiguous stays BLOCKED.
+- Build: inspect deploy/publish/upload side effects, use the Build Check's disposable workspace exactly, no substitute build mechanism, no automatic installs, preserve BLOCKED environment/tooling results.
+- Documentation: read-only claim reconciliation, current docs, no automatic fixes, no external-link fetching.
+- Security / Configuration: current-state boundaries, ignored-file exclusions, no Git-history scanning, no scanner/network activity, external symlink targets not followed, secret-output redaction remains mandatory.
+
+### Check isolation
+
+Each underlying check conceptually completes and produces its native output before aggregation. Do not merge the six checks into one generic repository scan. Do not reproduce the six full native blocks again inside the final summary if they have already been emitted during execution. The final summary should use counts, the compact result matrix, and concise unfavorable detail lines.
+
+### NOT FOUND semantics
+
+This first version has no project-specific optional-check policy. Therefore: one or more NOT FOUND, with no FAIL and no BLOCKED, results in INCOMPLETE. Do not guess that a missing Test/Lint/Build/etc. workflow is mandatory or optional for that project.
+
+### FAIL + BLOCKED semantics
+
+If both FAIL and BLOCKED exist, the Release Readiness is NOT READY, because a confirmed FAIL independently establishes not-ready. Still preserve and prominently display every BLOCKED result as unresolved in the matrix and detail lines.
+
+### Dirty-working-tree behavior
+
+A dirty working tree is not itself an orchestration error. Git State Check will classify it according to its own rules. Continue later checks against the same current state unless an underlying check unexpectedly changes the repository or another safety rule prevents execution.
+
+### Malformed / missing result handling
+
+If an expected check definition is missing, its native output is malformed or uninterpretable, or the orchestrator cannot safely determine its result, do not invent a result. Treat this as an orchestration problem. Stop if aggregation can no longer be trusted. Return top-level BLOCKED. Explain the orchestration failure safely.
+
+### Security-output propagation
+
+When Security / Configuration Check returns findings, reuse only the safe already-redacted metadata produced by that check. Never reread the sensitive file for summary generation. Never expand a redacted field. Never print a secret value, private-key contents, or a full sensitive line.
+
+### Repeatability
+
+The Release Readiness Summary must be safe to run repeatedly. It must not accumulate build artifacts in the original repository, modify documentation, modify security configuration, create credentials, stage/commit/push, or mutate Git history. Each run reflects the repository's current state.
+
+### No new release criteria
+
+Do not add requirements for version tags, semantic versioning, CHANGELOG presence, release notes, branch naming, GitHub Actions, approvals, package publication, release artifacts, or deployment state, unless an existing underlying check already evaluates that evidence. The Release Readiness Summary v1 aggregates only the six existing checks.
+
+### No release actions
+
+The summary reports readiness only. It must never tag a commit, create a GitHub release, publish a package, push, deploy, upload artifacts, modify files, stage, or commit.
+
+### Counting
+
+Counts must reflect the six raw native results exactly. Passed is the number of PASS results. Failed is the number of FAIL results. Not Found is the number of NOT FOUND results. Blocked is the number of BLOCKED results. The four counts must sum to 6.
+
+If orchestration itself becomes BLOCKED before all six checks complete, Checks still reports 6 as the configured check set, counts cover only safely obtained native check results, Result and Reason must clearly state orchestration stopped before completion, do not fabricate missing check results, and use `unknown` where an exact count would otherwise require invention.
+
+### Unfavorable detail format
+
+For each FAIL, NOT FOUND, or BLOCKED result, include a concise safe detail using the underlying check's existing safe reason:
+
+```
+Check: <check name>
+Result: <native result>
+Reason: <existing safe check reason>
+```
+
+Do not fabricate or reinterpret a new domain reason.
+
+### Output
+
+Output exactly the following top-level block, using READY, NOT READY, INCOMPLETE, or BLOCKED as appropriate:
+
+```
+Release Readiness: READY, NOT READY, INCOMPLETE, or BLOCKED
+Checks: 6
+Passed: <count>
+Failed: <count>
+Not Found: <count>
+Blocked: <count>
+Result: <short result>
+Reason: <one short explanation>
+```
+
+Then show this matrix:
+
+```
+Git State: <PASS or FAIL>
+Test: <PASS, FAIL, NOT FOUND, or BLOCKED>
+Lint: <PASS, FAIL, NOT FOUND, or BLOCKED>
+Build: <PASS, FAIL, NOT FOUND, or BLOCKED>
+Documentation: <PASS, FAIL, NOT FOUND, or BLOCKED>
+Security / Configuration: <PASS, FAIL, NOT FOUND, or BLOCKED>
+```
+
+Then show unfavorable detail lines when applicable, using the unfavorable detail format above.
