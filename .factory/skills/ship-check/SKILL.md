@@ -933,6 +933,112 @@ Do not add requirements for version tags, semantic versioning, CHANGELOG presenc
 
 The summary reports readiness only. It must never tag a commit, create a GitHub release, publish a package, push, deploy, upload artifacts, modify files, stage, or commit.
 
+### Native-result matrix as single source of truth
+
+After all safely obtainable underlying check results are finalized, create the native-result matrix first. Treat those matrix entries as the single source of truth for aggregation and counting. Do not derive counts from narrative prose, expected outcomes, earlier notes, or memory.
+
+For a normal completed six-check run, the matrix must contain exactly these six entries:
+
+1. Git State
+2. Test
+3. Lint
+4. Build
+5. Documentation
+6. Security / Configuration
+
+Each entry must contain exactly one native result from that check's allowed result set.
+
+### Deterministic tally algorithm
+
+For a normal completed six-check run:
+
+1. Initialize: `passed = 0`, `failed = 0`, `not_found = 0`, `blocked = 0`.
+2. Traverse the finalized six-entry native-result matrix exactly once.
+3. For each matrix row:
+   - PASS → increment `passed` by exactly 1,
+   - FAIL → increment `failed` by exactly 1,
+   - NOT FOUND → increment `not_found` by exactly 1,
+   - BLOCKED → increment `blocked` by exactly 1.
+4. Every matrix row contributes to exactly one bucket.
+5. No matrix row may be omitted.
+6. No matrix row may be counted twice.
+7. Do not manually infer a count from the release-level verdict.
+8. Do not adjust a count to make it match an expected result.
+
+### Mandatory count invariant
+
+Before emitting the top-level Release Readiness block for a normal completed run, verify:
+
+`passed + failed + not_found + blocked == 6`
+
+Also verify independently that the number of native-result matrix rows equals 6 and that the four counters exactly reproduce the six matrix results.
+
+The summary MUST NOT emit its final top-level block until these validations pass.
+
+### Matrix / count consistency
+
+The matrix and top-level counts must describe the same six native result records.
+
+Example:
+
+```
+Git State: PASS
+Test: PASS
+Lint: PASS
+Build: BLOCKED
+Documentation: PASS
+Security / Configuration: PASS
+```
+
+must produce exactly:
+
+```
+Passed: 5
+Failed: 0
+Not Found: 0
+Blocked: 1
+```
+
+Never `Passed: 4`.
+
+### Reconciliation before output
+
+If the matrix is complete and valid but an intermediate tally disagrees with it, recompute the tally directly from the finalized matrix before output. Do not preserve the incorrect tally. Do not invent or alter any native result. Do not change the release-level precedence.
+
+If the six finalized native results are available, a simple arithmetic or tally mistake should be corrected before output rather than surfaced as a contradictory final block.
+
+### Unreconcilable output-integrity problem
+
+If the orchestrator cannot safely reconcile the native matrix, the result counts, or the underlying check records, then do not invent values, do not emit internally contradictory counts, treat it as an orchestration or output-integrity problem, return top-level BLOCKED according to the existing malformed or missing-result safety rule, and use `unknown` where exact counts genuinely cannot be established.
+
+This case applies only when the underlying records cannot be safely reconciled. It does NOT apply when a complete six-entry matrix exists and can simply be recounted.
+
+### Aggregation sequencing
+
+Make the sequencing explicit:
+
+1. Run or collect underlying native results.
+2. Finalize the native-result matrix.
+3. Validate the matrix.
+4. Derive all four counts from that matrix.
+5. Verify the count invariant.
+6. Apply the existing deterministic release-level precedence using the same native results.
+7. Emit the top-level block.
+8. Emit the matrix.
+9. Emit unfavorable detail lines.
+
+The aggregation precedence remains unchanged: any FAIL → NOT READY; else any BLOCKED → BLOCKED; else any NOT FOUND → INCOMPLETE; else all six PASS → READY.
+
+### Output self-consistency
+
+The final output must be internally self-consistent:
+
+- the matrix determines the counts,
+- the same matrix determines the precedence inputs,
+- counts must match matrix rows exactly,
+- counts must sum to 6 on a completed run,
+- the release-level result must match the precedence applied to those same six rows.
+
 ### Counting
 
 Counts must reflect the six raw native results exactly. Passed is the number of PASS results. Failed is the number of FAIL results. Not Found is the number of NOT FOUND results. Blocked is the number of BLOCKED results. The four counts must sum to 6.
