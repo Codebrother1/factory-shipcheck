@@ -1,6 +1,6 @@
 # Factory ShipCheck
 
-ShipCheck is a reusable project-level Factory Skill for performing pre-ship readiness checks with Droid. It currently implements Git-state, automated-test, lint/static-analysis, build, and documentation readiness checks, and reports whether a project passes the current readiness criteria. The full release-readiness roadmap is not yet complete.
+ShipCheck is a reusable project-level Factory Skill for performing pre-ship readiness checks with Droid. It currently implements Git-state, automated-test, lint/static-analysis, build, documentation, and security/configuration readiness checks, and reports whether a project passes the current readiness criteria. The full release-readiness roadmap is not yet complete.
 
 ## Why I Built This
 
@@ -8,7 +8,7 @@ This project is being built while learning Factory/Droid incrementally. Each cap
 
 ## Current Capabilities
 
-Five checks are implemented so far: the **Git State Check**, the **Test Check**, the **Lint Check**, the **Build Check**, and the **Documentation Check**.
+Six checks are implemented so far: the **Git State Check**, the **Test Check**, the **Lint Check**, the **Build Check**, the **Documentation Check**, and the **Security / Configuration Check**.
 
 ### Git State Check
 
@@ -123,6 +123,50 @@ The Documentation Check has four possible results:
 
 All four Documentation Check outcomes have now been behaviorally exercised.
 
+### Security / Configuration Check
+
+The Security / Configuration Check examines the CURRENT non-ignored repository state for a deliberately narrow set of high-confidence security/configuration release risks. Current in-scope state may include tracked files, staged contents, unstaged tracked contents, and non-ignored untracked project content. It:
+
+- respects ignore boundaries,
+- does not inspect ignored local secret files,
+- does not silently substitute HEAD,
+- does not scan Git history,
+- does not install scanners,
+- does not query external secret managers,
+- does not fetch vulnerability databases,
+- makes no network requests,
+- does not perform general vulnerability/CVE scanning,
+- does not perform penetration testing,
+- does not make broad application-specific security judgments,
+- and is read-only.
+
+The narrow high-confidence v1 finding categories are:
+
+- unmistakable private-key material,
+- narrowly supported structured credential files,
+- concrete non-placeholder sensitive environment/configuration assignments,
+- hard-coded credentials only when strong structural/context evidence exists.
+
+Entropy-only guessing is excluded. A filename containing "secret", "token", "credential", or "key" is not enough by itself. Obvious placeholders and variable references are not findings. Example/template/test-fixture context is handled conservatively.
+
+#### Secret output safety
+
+If sensitive material is detected, ShipCheck must NEVER print:
+
+- the secret value,
+- private-key contents,
+- the full sensitive line,
+- or enough surrounding text to reconstruct the value.
+
+Findings use safe redacted structural metadata only.
+
+The Security / Configuration Check has four possible results:
+
+- **PASS** — meaningful in-scope security/configuration surface was identified and inspected, and no confirmed high-confidence finding was present.
+- **FAIL** — at least one high-confidence, mechanically established current release-risk finding was present.
+- **NOT FOUND** — no meaningful security/configuration surface within v1 scope was identified.
+- **BLOCKED** — relevant security/configuration evidence exists, but ShipCheck cannot safely or confidently classify it without crossing a forbidden/unavailable boundary or guessing.
+
 ## Example Output
 
 The ShipCheck Git State Check outputs a fixed, concise block. A passing result looks like:
@@ -189,6 +233,15 @@ Result: PASS
 Reason: The current canonical README's explicit mechanically verifiable claims are consistent with current repository evidence.
 ```
 
+The Security / Configuration Check outputs a block of the same shape. A passing result looks like:
+
+```
+Security / Configuration Check: PASS
+Issues: 0
+Result: no confirmed high-confidence security/configuration findings
+Reason: A meaningful tracked environment/configuration surface was inspected; its values were ordinary configuration, explicit placeholders, or variable references.
+```
+
 ## How It Works
 
 ShipCheck is a **project-level Factory Skill**. Its entry point lives at:
@@ -208,6 +261,8 @@ ShipCheck is a **project-level Factory Skill**. Its entry point lives at:
 - The Build Check may execute at most one existing project-defined local build command. Because normal builds may intentionally generate files, ShipCheck first reproduces the current project state in a disposable workspace; the build executes only there; expected build artifacts may be created inside that workspace; the workspace is removed afterward; and the original repository is verified unchanged. Unsafe deploy/publish/upload workflows and unavailable required tooling return BLOCKED instead of being executed or misclassified. The disposable workspace is project-tree filesystem isolation, not a full OS sandbox.
 
 - The Documentation Check performs a read-only reconciliation between explicit current documentation claims and concrete current repository evidence. It verifies only explicit mechanically verifiable claims (paths, entry points, canonical commands, capability/status/roadmap consistency) and distinguishes examples and planned language from current-state claims. It does not execute test/lint/build commands, fetch external links, or modify documentation.
+
+- The Security / Configuration Check inspects current non-ignored project state read-only, identifies a narrow high-confidence security/configuration surface, applies placeholder/example/fixture protections, never uses entropy-only guessing, refuses to follow security-relevant symlinks outside the repository, and reports sensitive findings using redacted metadata only.
 
 ## Quickstart
 
@@ -361,11 +416,66 @@ We performed a set of behavioral tests of the Documentation Check:
 
 These experiments demonstrate four distinct Documentation Check responsibilities: identifying documentation authority, reconciling explicit documentation claims with concrete repository evidence, evaluating current uncommitted documentation rather than only HEAD, and refusing to guess when documentation authority cannot be resolved.
 
+### Security / Configuration Check
+
+We performed a set of behavioral tests of the Security / Configuration Check:
+
+1. **Real Factory ShipCheck repository with no meaningful v1 security/configuration surface → NOT FOUND.**
+   - The current repository was inspected read-only.
+   - No meaningful in-scope environment/configuration/credential/private-key surface was identified.
+   - Ordinary source/documentation prose did not become findings.
+   - Ignored local secret contents were not inspected.
+   - Git history was not scanned.
+   - No Test/Lint/Build command was executed.
+   - No network request was made.
+   - Security / Configuration Check → NOT FOUND.
+   - "Nothing security-specific to inspect" is NOT FOUND, not PASS.
+2. **Security demo with a tracked, non-ignored `.env` → PASS.**
+   - The committed `.env` contained `APP_ENV=demo`, `API_TOKEN=CHANGEME`, and `DATABASE_PASSWORD=${DATABASE_PASSWORD}`.
+   - `.env` created a meaningful v1 configuration surface.
+   - `APP_ENV=demo` was ordinary configuration.
+   - `API_TOKEN=CHANGEME` was an explicit placeholder.
+   - `DATABASE_PASSWORD=${DATABASE_PASSWORD}` was a variable reference rather than a stored credential.
+   - No supported high-confidence finding was present.
+   - Security / Configuration Check → PASS.
+   - This experiment proved the PASS versus NOT FOUND distinction.
+3. **Same security demo with one temporary non-ignored synthetic private-key-shaped artifact → FAIL.**
+   - The temporary file was named `synthetic-private-key.pem`.
+   - It contained an unmistakable private-key boundary structure.
+   - The content was deliberately synthetic/nonfunctional for the experiment.
+   - ShipCheck established the finding using structural metadata; cryptographic key validation was not required.
+   - Security / Configuration Check → FAIL.
+
+   **Redaction proof:** during the actual Security Check run, the body was NOT printed, the complete file was NOT printed, no credential value was reproduced as evidence, and only safe path/type/structural metadata was reported. Example of the safe finding style (the synthetic body is not reproduced here):
+
+   ```
+   Finding 1:
+   Type: private key
+   Path: synthetic-private-key.pem
+   Evidence: PEM private-key header detected; contents redacted.
+   Issue: Private-key material is present in current non-ignored project content.
+   ```
+
+   The temporary artifact was subsequently deleted and the exact committed PASS baseline restored.
+4. **Same security demo with a security-relevant external symlink → BLOCKED.**
+   - `README.md` explicitly identified `release-secrets.env` as current release security configuration.
+   - `release-secrets.env` was a symlink whose target resolved outside the repository.
+   - The Security / Configuration Check rules forbid following external symlink targets.
+   - ShipCheck used only safe symlink metadata.
+   - It did NOT dereference `release-secrets.env`.
+   - It did NOT inspect the external target contents.
+   - It did NOT invent a FAIL finding based on the filename.
+   - It could not safely establish PASS because the relevant security configuration could not be inspected.
+   - The meaningful surface prevented NOT FOUND.
+   - Therefore Security / Configuration Check → BLOCKED.
+   - Cleanup removed both the repository symlink and the external synthetic temporary file, and returned the demo to the exact committed PASS baseline.
+
+These experiments demonstrate four separate responsibilities: distinguishing absence of a meaningful security surface from a clean inspectable surface, recognizing high-confidence current security/configuration findings, avoiding false positives for placeholders and variable references, and enforcing safety boundaries and protecting sensitive material in ShipCheck's own output.
+
 ## Roadmap
 
 The following checks are **planned** and will be added incrementally. They are not currently implemented:
 
-- security/configuration
 - release readiness summary
 
 ## Built With
@@ -374,4 +484,4 @@ This project is being built and tested with Factory Droid. The initial developme
 
 ## Status
 
-ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check isolation was behaviorally tested by allowing build artifacts to be generated in a disposable workspace while the original repository remained clean. The Build Check BLOCKED behavior was tested for both remote publication/upload side effects and unavailable required tooling. The Documentation Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Documentation Check's current-state behavior was tested with a corrected but uncommitted README. The Documentation Check's BLOCKED behavior was tested with an explicit non-authoritative generated README whose declared authoritative source was unavailable. Security/configuration and release-readiness-summary checks are not yet implemented.
+ShipCheck is an early work-in-progress. The Git State Check is implemented and behaviorally tested. The Test Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Lint Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Build Check isolation was behaviorally tested by allowing build artifacts to be generated in a disposable workspace while the original repository remained clean. The Build Check BLOCKED behavior was tested for both remote publication/upload side effects and unavailable required tooling. The Documentation Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Documentation Check's current-state behavior was tested with a corrected but uncommitted README. The Documentation Check's BLOCKED behavior was tested with an explicit non-authoritative generated README whose declared authoritative source was unavailable. The Security / Configuration Check is implemented and behaviorally tested across PASS, FAIL, NOT FOUND, and BLOCKED. The Security / Configuration Check secret-output redaction was behaviorally verified. The Security / Configuration Check's external-symlink safety boundary was behaviorally verified. Release-readiness-summary is the only remaining planned check.
