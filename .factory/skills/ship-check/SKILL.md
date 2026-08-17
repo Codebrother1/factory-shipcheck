@@ -11,7 +11,7 @@ ShipCheck will become a reusable pre-ship review workflow for checking a project
 
 ## Current Version
 
-ShipCheck currently implements the Git State Check, Test Check, Lint Check, Build Check, and Documentation Check. Security/configuration and release-summary checks are planned and will be added incrementally in later steps.
+ShipCheck currently implements the Git State Check, Test Check, Lint Check, Build Check, Documentation Check, and Security / Configuration Check. Release-summary checks are planned and will be added incrementally in later steps.
 
 ## Git State Check
 
@@ -570,6 +570,229 @@ Output exactly the following top-level block, using PASS, FAIL, NOT FOUND, or BL
 ```
 Documentation Check: PASS, FAIL, NOT FOUND, or BLOCKED
 Documentation: <canonical documentation path(s) or none>
+Issues: <count or unknown>
+Result: <short result>
+Reason: <one short explanation>
+```
+
+When there are findings, list them underneath the top-level block using the findings format above.
+
+## Security / Configuration Check
+
+Determine whether the CURRENT repository contains an explicit, mechanically detectable security/configuration artifact that represents a clear pre-ship risk within this check's deliberately narrow scope. This is not a general security audit, vulnerability scanner, penetration test, dependency CVE scanner, or architecture review. Read-only for this first version.
+
+### Intent
+
+Answer the narrow v1 question: does the current repository contain explicit, mechanically detectable security/configuration artifacts that represent a clear pre-ship risk within the check's defined scope? Prefer no finding over speculative detection.
+
+### Current-state definition
+
+Security / Configuration Check evaluates CURRENT on-disk repository state, including:
+
+- tracked files,
+- staged contents,
+- unstaged tracked contents,
+- non-ignored untracked files.
+
+Do not silently substitute HEAD. A high-confidence finding in tracked, staged, or non-ignored untracked current project content is in scope. Do not assign different severity based only on whether the file is tracked, staged, or untracked in this first version. Record that state only as safe supporting metadata where useful.
+
+### Ignored-file boundary
+
+Do NOT inspect ignored files for secret contents. Ignored local `.env` files, credentials, caches, dependency trees, machine-local state, and generated local artifacts are outside this first version's repository-content inspection unless the repository explicitly promotes them into current project evidence. Their mere local existence must not produce FAIL.
+
+### Discovery approach
+
+Use a conservative read-only discovery sequence:
+
+1. Inspect current Git/file state.
+2. Determine ignored vs non-ignored project content.
+3. Exclude `.git` internals.
+4. Exclude ignored dependency/vendor/build/cache trees.
+5. Inspect high-signal filenames and extensions.
+6. Inspect explicit environment/configuration files.
+7. Inspect supported structured credential formats.
+8. Inspect for unmistakable private-key signatures.
+9. Use explicit local repository security/configuration documentation as supporting evidence where relevant.
+
+Do not recursively inspect ignored dependency/build/cache trees merely to search for secrets.
+
+### High-confidence finding categories
+
+Inspect only supported high-confidence finding categories.
+
+1. **Private key material** — recognize unmistakable private-key blocks such as `BEGIN PRIVATE KEY`, `BEGIN RSA PRIVATE KEY`, `BEGIN OPENSSH PRIVATE KEY`, and equivalent unmistakable private-key structures. If such material appears in current in-scope project content, record a FAIL finding. Never print key contents. Never print the full matching line. Safe evidence wording example: `Evidence: PEM private-key header detected; contents redacted.`
+
+2. **Structured credential files** — treat as findings only when filename/context AND structure strongly establish credential material. Supported first-version examples:
+   - Google/service-account-style JSON: service-account structure is explicit and a `private_key` field contains private-key material.
+   - AWS-style credential structure: an explicit access-key field paired with an explicit secret-access-key field, with values that are not empty or placeholders.
+   Do not fail merely because a filename contains `secret`, `credential`, `token`, or `key`.
+
+3. **Environment/configuration secret assignments** — inspect tracked/staged/non-ignored environment/config files where appropriate. A secret assignment finding requires a clearly sensitive field name AND a concrete non-placeholder value. Sensitive field semantics may include explicit secret/password/token/private-key/secret-access-key fields. Do not treat every configuration value as sensitive. Do not treat empty values, obvious placeholders, variable references, or template markers as confirmed secrets.
+
+4. **Hard-coded secrets in ordinary source/config files** — be extremely conservative. A variable named `password`, `token`, `key`, or `secret` is not enough by itself. Do not use entropy-only guessing. Require strong structural/context evidence before reporting FAIL. For this first version, prefer no finding over speculative secret detection.
+
+### Environment/config handling
+
+A secret assignment in an environment/config file requires both a clearly sensitive field name and a concrete non-placeholder value. Do not treat every configuration value as sensitive. Distinguish real non-placeholder secret material from empty values, obvious placeholders, variable references, and template markers.
+
+### Examples / templates / test fixtures / placeholders
+
+Recognize obvious placeholder forms conservatively, including: empty values, `CHANGEME`, `PLACEHOLDER`, `YOUR_...`, `EXAMPLE`, `DUMMY`, `FAKE`, `TEST`, `<...>`, `${...}`, and repeated `x` / `XXXXX`-style placeholders. Case-insensitive where appropriate. Do not infer that every value outside this list is automatically a real secret.
+
+Files clearly named as examples/templates, such as `.env.example`, `.env.template`, or sample configuration, should not produce ordinary env-secret findings for obvious fake/example values. However, an unmistakable private-key block or structurally concrete credential material is not automatically exempt merely because the path says example/template.
+
+Do not fail on ordinary clearly fake test-fixture values. Do not automatically exempt unmistakable private-key material or structurally concrete credential material merely because a path includes `test`, `fixture`, `sample`, or `mock`. Require high confidence.
+
+### Sensitive-file hygiene
+
+Tracked, staged, and non-ignored untracked sensitive artifacts are all part of CURRENT repository state. If their contents meet a high-confidence finding rule, report FAIL. Do NOT fail merely because `.gitignore` is absent, a filename sounds sensitive, or an ignored local secret file exists.
+
+### Configuration risks outside secrets
+
+For this first version, EXCLUDE broad application-specific judgments such as `DEBUG=true`, permissive CORS, `0.0.0.0` binding, weak TLS configuration, development mode, container privilege, firewall settings, or application-specific auth policy, unless a future version defines a highly reliable project-agnostic rule. Do not produce speculative configuration findings.
+
+### Symlink handling
+
+Treat symlinks conservatively. Inspect the symlink path/target metadata. Follow only targets that resolve inside the repository. Never follow a target outside the repository. Never read arbitrary external filesystem content through a symlink. If an external or unresolved symlink is genuinely necessary to classify a relevant security artifact, return BLOCKED rather than guessing.
+
+### Generated / vendor / binary boundaries
+
+A file being generated does not automatically exempt it. Tracked/staged/non-ignored generated configuration may still be in scope unless it is inside an excluded build/cache/vendor area. Exclude common dependency/vendor/build/cache trees from content scanning in this first version. Do not inspect them merely to hunt for secrets. Do not content-scan binary blobs in this first version. A suspicious filename alone is not enough to FAIL. If a binary artifact is relevant but cannot be classified without unsafe or speculative inspection, do not guess.
+
+### Git history
+
+Current state only. Do NOT scan prior commits, deleted historical files, reflogs, or other Git history in this first version.
+
+### Repository security-policy context
+
+Explicit local repository security/configuration policy may be used as supporting context. It may clarify intended fixture/example files, authoritative configuration locations, and project-specific scope. It may not override an unmistakable private-key or concrete credential finding.
+
+### False-positive safety
+
+Distinguish:
+
+- real credential material vs placeholders,
+- current project files vs ignored local state,
+- current config vs examples/templates,
+- real credentials vs test/fake fixtures,
+- private-key material vs documentation prose,
+- code/documentation examples vs actual current credential artifacts.
+
+A private-key phrase shown as plain documentation prose or a non-secret example must not automatically trigger a finding unless actual private-key structure/material is present. A README code block containing a placeholder secret must not automatically FAIL. No high-entropy guessing. No broad provider-token regex catalog in this first version.
+
+### Secret-output safety
+
+This is mandatory. If any sensitive material is detected, NEVER:
+
+- print the secret value,
+- print the private key,
+- print the full sensitive line,
+- print enough surrounding text to reconstruct the value,
+- echo a credential merely to prove it exists.
+
+Use only safe metadata. Use this finding format:
+
+```
+Finding <n>:
+Type: <private key / credential / sensitive config / other supported type>
+Path: <repository path>
+Evidence: <safe redacted structural description>
+Issue: <short explanation>
+```
+
+Examples:
+
+- `Evidence: PEM private-key header detected; contents redacted.`
+- `Evidence: non-placeholder AWS secret-access-key field detected alongside an access-key field; values redacted.`
+
+### Decision rules
+
+1. Inspect current repository state read-only.
+2. Determine the non-ignored in-scope security/configuration surface.
+3. If no meaningful v1 surface exists, return NOT FOUND.
+4. Inspect only supported high-confidence finding categories.
+5. Apply placeholder/example/fixture false-positive protections.
+6. If one or more confirmed high-confidence findings exist, return FAIL.
+7. If meaningful surface exists and no confirmed findings exist, return PASS.
+8. If relevant evidence exists but cannot be safely or confidently classified, return BLOCKED.
+9. Never expose secret values in output.
+10. Never modify repository state.
+
+### Execution safety
+
+Security / Configuration Check v1 is read-only. Do NOT:
+
+- modify files,
+- delete exposed material,
+- rotate credentials,
+- add `.gitignore` entries,
+- install scanners,
+- execute Test/Lint/Build commands,
+- invoke cloud CLIs,
+- query external secret managers,
+- fetch vulnerability databases,
+- make network requests,
+- stage, commit, or push.
+
+### Scope exclusions
+
+Explicitly exclude from this first version:
+
+- ignored local files,
+- `.git` internals,
+- dependency/vendor trees,
+- build artifacts and caches,
+- entropy-only secret guessing,
+- giant provider-token regex catalogs,
+- binary content scanning,
+- CVE/dependency vulnerability scanning,
+- network security testing,
+- runtime penetration testing,
+- cloud-account inspection,
+- external secret managers,
+- Git history scanning,
+- subjective security architecture review,
+- broad application-specific configuration judgments.
+
+### Results
+
+PASS when all of the following are true:
+
+- a meaningful v1 security/configuration surface was identified and inspectable,
+- and no confirmed high-confidence finding within v1 scope was present.
+
+FAIL when:
+
+- at least one high-confidence, mechanically established security/configuration release-risk finding exists in current in-scope repository content.
+
+NOT FOUND when:
+
+- no meaningful security/configuration surface within v1 scope could be identified.
+
+BLOCKED when:
+
+- relevant security/configuration evidence exists, but ShipCheck cannot safely or confidently classify it without unavailable policy/tooling/context or guessing.
+
+### Findings format
+
+For every FAIL finding, show a concise record underneath the top-level block:
+
+```
+Finding <n>:
+Type: <finding type>
+Path: <repository path>
+Evidence: <safe redacted evidence>
+Issue: <short explanation>
+```
+
+No secret value may appear in output.
+
+### Output
+
+Output exactly the following top-level block, using PASS, FAIL, NOT FOUND, or BLOCKED as appropriate:
+
+```
+Security / Configuration Check: PASS, FAIL, NOT FOUND, or BLOCKED
 Issues: <count or unknown>
 Result: <short result>
 Reason: <one short explanation>
