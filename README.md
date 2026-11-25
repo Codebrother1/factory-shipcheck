@@ -2,6 +2,8 @@
 
 ShipCheck is a reusable project-level Factory Skill for performing pre-ship readiness checks with Droid. It currently implements six readiness checks (Git State, Test, Lint, Build, Documentation, and Security / Configuration) plus the Release Readiness Summary orchestrator, and reports whether a project passes the current readiness criteria. The current ShipCheck readiness roadmap is implemented.
 
+**Scope:** ShipCheck is a Factory Droid skill expressed as reusable agent instructions, not a standalone deterministic verification engine. It directs Droid to discover and run existing project checks, preserve their outcomes, and report evidence for human review. Its readiness result is limited to the defined checks and is not a guarantee of production safety.
+
 ## Why I Built This
 
 This project is being built while learning Factory/Droid incrementally. Each capability is added, tested, and documented as a separate step, so the reasoning behind every check is explicit and reviewable. The goal is to understand Factory Skills by building one, not to ship a finished product all at once.
